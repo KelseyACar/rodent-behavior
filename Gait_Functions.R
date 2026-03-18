@@ -1,7 +1,9 @@
-### Source File for my Digigait and raw gait functions ###
+# Source File for Digigait and raw gait functions ###
 
-# LIBRARIES REQUIRED #
+
+# Libraries Required ------------------------------------------------------
 pacman::p_load('pacman', 'ggplot2','mosaic', 'dplyr', 'ggridges', 'plotly', 'hrbrthemes','tidyverse','patchwork','ggstatsplot','rstatix','dunn.test','FSA','ggprism','tidyr', 'janitor')
+
 
 
 # 1) groupSummary 
@@ -24,10 +26,10 @@ groupSummary <- function(df, dependVar, type = c("mean_sd", "mean_se", "median_i
 }
 
 # To Call
-# virus_summary <- groupSummary(df, time_to_fall, "mean_se", virus, timepoint)
-# View(virus_summary)
+# treatment_summary <- groupSummary(df, time_to_fall, "mean_se", treatment, timepoint)
+# View(treatment_summary)
 
-# animal_summary <- groupSummary(df, time_to_fall, "mean_se", animal, virus, timepoint)
+# animal_summary <- groupSummary(df, time_to_fall, "mean_se", animal, treatment, timepoint)
 # View(animal_summary)
 
 
@@ -57,7 +59,7 @@ gaitSummaries <- function(df, variables, ...) {
 # summed_data <- gaitSummaries(
 # df = gait, 
 # variables = variables,  # Pass list of variables directly
-# animal, virus, timepoint
+# animal, treatment, timepoint
 # )
 
 
@@ -117,7 +119,7 @@ process_file <- function(filepath, speed_label) {
   df <- read.csv(filepath)
   
   # ID metadata
-  meta <- df[1, c("animal","virus","timepoint")] %>% as.list()
+  meta <- df[1, c("animal","treatment","timepoint")] %>% as.list()
   
   # calculate step duration
   df <- df %>%
@@ -140,7 +142,7 @@ process_file <- function(filepath, speed_label) {
   
   tibble(
     id = meta$animal,
-    virus = meta$virus,
+    treatment = meta$treatment,
     timepoint = meta$timepoint,
     speed = speed_label,
     fore_cv = fore_cv,
@@ -214,13 +216,13 @@ acf_groupSummary <- function(df, ...) {
 
 # To Call:
 # acf_animalStats <- acf_groupSummary(acf_perPaw df, animal, timepoint)
-# acf_virusStats <- acf_groupSummary(acf_perPaw df, animal, virus, timepoint)
-# acf_sexStats <- acf_groupSummary(acf_perPaw df, animal, sex, virus, timepoint)
+# acf_treatmentStats <- acf_groupSummary(acf_perPaw df, animal, treatment, timepoint)
+# acf_sexStats <- acf_groupSummary(acf_perPaw df, animal, sex, treatment, timepoint)
 
 
 
 
-# SCRAP & Plots -------------------------------------------------------------------
+# Plots -------------------------------------------------------------------
 
 
 ## baselineChange
@@ -244,27 +246,29 @@ baselineChange <- function(df, time_var, baseline_timepoint, ...) {
 }
 
 # To Call
-# new_df <- baselineChange(df, "timepoint", baseline_timepoint = 0, virus)
+# new_df <- baselineChange(df, "timepoint", baseline_timepoint = 0, treatment)
 
 
 
-##  plot_gait FN : base structure of all gait plots ---> make edits here
+# Line plot for gait variables --------------------------------------------
+
+# 1) plot_gait FN : base structure of all gait plots ---> make edits here
 # data - df of choice (summary df)
 # y_var - y variable
 # y_error - y variable SE
 # y_label - y-axis label
 # title - graph title
 
-# line plots for virus groups
+# line plots for treatment groups
 plotGait <- function(data, y_var, y_error, title, y_label, color_palette = NULL) {
   
   #Default color palette if non provided
   if(is.null(color_palette)) {
-    color_palette <- c('AAV5-EYFP' = '#A3E4D7', 'AAV5-hTyr-1:100' = '#F8C471', 'AAV5-hTyr-Full' = '#E67E22')
+    color_palette <- c('A' = '#A3E4D7', 'B' = '#F8C471', 'C' = '#E67E22')
   }
   
   # Base Plot
-  p <- ggplot(data, aes(x= timepoint, y = .data[[y_var]], group = virus, color = virus)) +
+  p <- ggplot(data, aes(x= timepoint, y = .data[[y_var]], group = treatment, color = treatment)) +
     geom_line(linewidth=1.3) +
     geom_errorbar(
       aes(ymin = .data[[y_var]] - .data[[y_error]], 
@@ -273,12 +277,12 @@ plotGait <- function(data, y_var, y_error, title, y_label, color_palette = NULL)
     ) +
     scale_color_manual(values = color_palette) +
     scale_x_discrete(
-      breaks = c(0,1,2,3,4,10,16)) + 
+      breaks = c(0,1,2)) + 
     labs(
       title = title,
-      x = "Time Since Injection (weeks)",
+      x = "Time Since Treatment",
       y = y_label,
-      color = "Virus"
+      color = "treatment"
     ) +
     theme_minimal() +
     theme(
@@ -299,16 +303,16 @@ plotGait <- function(data, y_var, y_error, title, y_label, color_palette = NULL)
 # )
 
 
-# line plots by sex
+# 2) line plots by sex
 plotGait2 <- function(data, y_var, y_error, title, y_label, color_palette = NULL) {
   
   #Default color palette if non provided
   if(is.null(color_palette)) {
-    color_palette <- c('AAV5-EYFP' = '#A3E4D7', 'AAV5-hTyr-1:100' = '#F8C471', 'AAV5-hTyr-Full' = '#E67E22')
+    color_palette <- c('A' = '#A3E4D7', 'B' = '#F8C471', 'C' = '#E67E22')
   }
   
   # Base Plot
-  p <- ggplot(data, aes(x= timepoint, y = .data[[y_var]], linetype = sex, color = virus, group = interaction(virus, sex))) +
+  p <- ggplot(data, aes(x= timepoint, y = .data[[y_var]], linetype = sex, color = treatment, group = interaction(treatment, sex))) +
     geom_line(linewidth=1.3) +
     geom_errorbar(
       aes(ymin = .data[[y_var]] - .data[[y_error]], 
@@ -317,12 +321,12 @@ plotGait2 <- function(data, y_var, y_error, title, y_label, color_palette = NULL
     ) +
     scale_color_manual(values = color_palette) +
     scale_x_discrete(
-      breaks = c(0,1,2,3,4,10,16)) + 
+      breaks = c(0,1,2)) + 
     labs(
       title = title,
-      x = "Time Since Injection (weeks)",
+      x = "Time Since Treatment",
       y = y_label,
-      color = "Virus"
+      color = "treatment"
     ) +
     theme_minimal() +
     theme(
@@ -334,25 +338,25 @@ plotGait2 <- function(data, y_var, y_error, title, y_label, color_palette = NULL
   return(invisible(p))
 }
 
-# violin gait plot
+# 3) violin gait plot
 violinGait <- function(data, y_var, title, y_label, color_palette = NULL) {
   
   #Default color palette if non provided
   if(is.null(color_palette)) {
-    color_palette <- c('AAV5-EYFP' = '#A3E4D7', 'AAV5-hTyr-1:100' = '#F8C471', 'AAV5-hTyr-Full' = '#E67E22')
+    color_palette <- c('A' = '#A3E4D7', 'B' = '#F8C471', 'C' = '#E67E22')
   }
 
   # Base Plot
-  p <- ggplot(data, aes(x= as.factor(timepoint), y = .data[[y_var]], fill = virus)) +
+  p <- ggplot(data, aes(x= as.factor(timepoint), y = .data[[y_var]], fill = treatment)) +
     geom_violin(position = 'dodge') +
     scale_fill_manual(values = color_palette) +
     scale_x_discrete(
-      breaks = c(0,1,2,3,4,10,16)) + 
+      breaks = c(0,1,2)) + 
     labs(
       title = title,
-      x = "Time Since Injection (weeks)",
+      x = "Time Since Treatment",
       y = y_label,
-      color = "Virus"
+      color = "treatment"
     ) +
     theme_minimal() +
     theme(
@@ -372,26 +376,26 @@ violinGait <- function(data, y_var, title, y_label, color_palette = NULL) {
 # )
 
 
-# box n whisker plots
+# 4) box n whisker plots
 boxGait <- function(data, y_var, title, y_label, color_palette = NULL) {
   
   #Default color palette if non provided
   if(is.null(color_palette)) {
-    color_palette <- c('AAV5-EYFP' = '#A3E4D7', 'AAV5-hTyr-1:100' = '#F8C471', 'AAV5-hTyr-Full' = '#E67E22')
+    color_palette <- c('A' = '#A3E4D7', 'B' = '#F8C471', 'C' = '#E67E22')
   }
   
   # Base Plot
-  p <- ggplot(data, aes(x= as.factor(timepoint), y = .data[[y_var]], fill = virus)) +
+  p <- ggplot(data, aes(x= as.factor(timepoint), y = .data[[y_var]], fill = treatment)) +
     geom_boxplot() +
     scale_fill_manual(values = color_palette) +
     #geom_jitter(position = 'dodge') +
     scale_x_discrete(
-      breaks = c(0,1,2,3,4,10,16)) + 
+      breaks = c(0,1,2)) + 
     labs(
       title = title,
-      x = "Time Since Injection (weeks)",
+      x = "Time Since Treatment",
       y = y_label,
-      color = "Virus"
+      color = "treatment"
     ) +
     theme_minimal() +
     theme(
