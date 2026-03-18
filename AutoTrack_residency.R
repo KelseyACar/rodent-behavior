@@ -1,5 +1,5 @@
 # This Script -------------------------------------------------------------
-  # This script pulls in residency data from Autotrack software used with Columbus Instruments open-field locomotion chambers & visualizes animals location as heat maps
+  # Pulls in residency data from Auto-Track software used with Columbus Instruments open-field locomotion chambers & visualizes animals location as heat maps
 # Load Libraries
 # Build Dataframe
   # call in pre-made metadata excel sheet of project info: animal ID, time, treatment, etc.
@@ -16,24 +16,25 @@
 # Load Libraries ----------------------------------------------------------
 pacman::p_load('dplyr', 'tidyverse', 'ggplot2', 'here', 'purrr', 'readr', 'viridis', 'dichromat', 'gridExtra') # auto installs required packages not yet installed
 here::i_am("AutoTrack_residency.R")
-source(here::here('my_functionsKC.R'))
+source(here('Loco_functions.R'))
 
+# to collect pack citations, uncomment and run line below:
+# cite_packages()
+
+# to collect pack versions, uncomment and run line below:
+# report_packages()
 
 
 # Build Dataframe  --------------------------------------------------------
 # call in metadata
-metadata <- read.csv(here::here("metadata", "agedNM_metadata.csv"), header = TRUE) # animal metadata
-file_mapping <- read.csv(here::here("metadata", "openField_residency_fileName_meta.csv"), header = TRUE) # filenames metadata
+metadata <- read.csv(here("metadata", "animal_metadata.csv"), header = TRUE) # animal metadata
+file_mapping <- read.csv(here("metadata", "openField_residency_fileName_meta.csv"), header = TRUE) # filenames metadata
 
 # open files by timepoint - make sure these order animal in the same way the animal vector is set up
 file_paths <- list(
-  timepoint_0 = list.files(path = here::here("Locomotion", "Pre-inj. Run 2", "Residency"), full.names= TRUE),
-  timepoint_1 = list.files(path = here::here("Locomotion", "1wk post", "Residency"), full.names= TRUE),
-  timepoint_2 = list.files(path = here::here("Locomotion", "2wk post", "Residency"), full.names= TRUE),
-  timepoint_4 = list.files(path = here::here("Locomotion" ,"4wk post", "Residency"), full.names= TRUE),
-  timepoint_10 = list.files(path = here::here("Locomotion" ,"10wk post", "Residency"), full.names= TRUE),
-  timepoint_16 = list.files(path = here::here("Locomotion", "16wk post","Residency"), full.names = TRUE)
-)
+  timepoint_0 = list.files(path = here("Locomotion", "wk_0", "Residency"), full.names= TRUE),
+  timepoint_1 = list.files(path = here("Locomotion", "wk_1", "Residency"), full.names= TRUE),
+  timepoint_2 = list.files(path = here("Locomotion", "wk_2", "Residency"), full.names= TRUE))
 
 # Check for trailing whitespace in file_mapping names
 any(grepl("\\s+$", file_mapping$file_name))
@@ -67,7 +68,7 @@ residency_df <- residency_df %>%
 
 
 # read and process files into full df
-res_process <- function(full_path, AnimalID, Sex, Virus, Timepoint, ... ) {
+res_process <- function(full_path, AnimalID, Sex, Treatment, Timepoint, ... ) {
   # read files skipping unnecessary rows
   raw <- read_csv(full_path, skip = 24, col_names = FALSE)
   
@@ -95,14 +96,14 @@ res_process <- function(full_path, AnimalID, Sex, Virus, Timepoint, ... ) {
     mutate(
       animalID = AnimalID,
       sex = Sex,
-      virus = Virus,
+      treatment = Treatment,
       timepoint = Timepoint
     )
   return(df_long)
 }
 
 # apply function to each file
-res_final <- pmap_dfr(residency_df %>% select(full_path, AnimalID, Sex, Virus, Timepoint),res_process)
+res_final <- pmap_dfr(residency_df %>% select(full_path, AnimalID, Sex, Treatment, Timepoint),res_process)
 
 # creates an extra y axis of NA values, filter out 
 res_final <- res_final %>%
@@ -120,29 +121,27 @@ res_scaled <- res_final %>%
   mutate(
     time_scaled = (time_log - min(time_log)) /    #global scale so a color means the same thing in every graph
       (max(time_log) - min(time_log))
-    ) %>% 
+  ) %>% 
   ungroup()
 
 # View(res_scaled)
-write.csv(res_scaled, file = here::here("Locomotion", "Dataframes", "aged_residency_df.csv"))
+write.csv(res_scaled, file = here("Locomotion", "Dataframes", "residency_df.csv"))
 
 
 # Heat Maps ---------------------------------------------------------------
-  # DO NOT use animals : 102247L, 90030LL, 90046R, 107549LL, 94407L (no rearing data)
-
 # generate HCL palette (hue, chroma, luminance)
 palette <- colorspace::sequential_hcl(5, palette = 'batlow')
 
 
-# Full plot
-Full <-ggplot(res_scaled %>% filter(animalID == "102247R"), aes(x= x, y= y, fill= time_scaled))+
+# A plot
+A <-ggplot(res_scaled %>% filter(animalID == "2AM"), aes(x= x, y= y, fill= time_scaled))+
   geom_tile(color= "white") + 
   facet_grid(~timepoint) +
   scale_fill_gradientn(colours = palette) +
   coord_equal() +
   theme_minimal(base_size = 8) +
   labs(
-    title= 'Full : 102247R') +  
+    title= 'A : 2AM') +  
   theme(
     legend.position = "right", 
     plot.title=element_text(size = 10, hjust =0),
@@ -153,20 +152,20 @@ Full <-ggplot(res_scaled %>% filter(animalID == "102247R"), aes(x= x, y= y, fill
     legend.text=element_text(size=4),
     strip.background = element_rect(colour = 'white')
   )
-Full
-ggsave(here::here("Locomotion", "Graphs", "residency plots","full_residency.pdf"),
-       plot = Full, width = 6, height = 4, dpi = 300)
+A
+ggsave(here("Locomotion", "Graphs", "residency plots","A_residency.pdf"),
+       plot = A, width = 6, height = 4, dpi = 300)
 
 
-# 1:100 plot : don't use 102247L
-Dilute <-ggplot(res_scaled %>% filter(animalID == "90046L"), aes(x= x, y= y, fill= time_scaled))+
+# 1:100 plot : don't use 2AM
+B <-ggplot(res_scaled %>% filter(animalID == "5BM"), aes(x= x, y= y, fill= time_scaled))+
   geom_tile(color= "white") + 
   facet_grid(~timepoint) +
   scale_fill_gradientn(colours = palette) +
   coord_equal() +
   theme_minimal(base_size = 8) +
   labs(
-    title= '1:100 : 90046L') +  
+    title= 'B : 5BM') +  
   theme(
     legend.position = "right", 
     plot.title=element_text(size = 10, hjust =0),
@@ -177,21 +176,21 @@ Dilute <-ggplot(res_scaled %>% filter(animalID == "90046L"), aes(x= x, y= y, fil
     legend.text=element_text(size=4),
     strip.background = element_rect(colour = 'white')
   )
-Dilute
+B
 
-ggsave(here::here("locomotion", "Graphs","residency plots", "dilute_residency.pdf"),
-       plot = Dilute, width = 6, height = 4, dpi = 300)
+ggsave(here("locomotion", "Graphs","residency plots", "B_residency.pdf"),
+       plot = B, width = 6, height = 4, dpi = 300)
 
 
-# EYFP plot
-EYFP <-ggplot(res_scaled %>% filter(animalID == "107544L"), aes(x= x, y= y, fill= time_scaled))+
+# C plot
+C <-ggplot(res_scaled %>% filter(animalID == "4CF"), aes(x= x, y= y, fill= time_scaled))+
   geom_tile(color= "white") + 
   facet_grid(~timepoint) +
   scale_fill_gradientn(colours = palette, limits = c(0,1)) +
   coord_equal() +
   theme_minimal(base_size = 8) +
   labs(
-    title= 'EYFP : 107544L') +  
+    title= 'C : 4CF') +  
   theme(
     legend.position = "right", 
     plot.title=element_text(size = 10, hjust =0),
@@ -202,16 +201,19 @@ EYFP <-ggplot(res_scaled %>% filter(animalID == "107544L"), aes(x= x, y= y, fill
     legend.text=element_text(size=4),
     strip.background = element_rect(colour = 'white')
   )
-EYFP
+C
 
-ggsave(here::here("Locomotion", "Graphs","residency plots", "EYFP_residency.pdf"),
-       plot = EYFP, width = 6, height = 4, dpi = 300)
+ggsave(here("Locomotion", "Graphs","residency plots", "C_residency.pdf"),
+       plot = C, width = 6, height = 4, dpi = 300)
 
 
 # combine to one plot
-combined <- grid.arrange(EYFP, Dilute, Full)
+combined <- grid.arrange(A, B, C)
 
-ggsave(here::here("Locomotion", "Graphs","residency plots", "residencyHeatMap_repAnimal.pdf"),
+ggsave(here("Locomotion", "Graphs","residency plots", "residencyHeatMap_repAnimal.pdf"),
        plot = combined, width = 6, height = 4, dpi = 300)
+
+
+
 
 
