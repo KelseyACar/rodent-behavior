@@ -329,35 +329,116 @@ filtered <- speed_df %>%
 View(filtered)
 
 
-# B) normality check
-normResult <- filtered %>%
-  shapiro_test(max_speed)
-is_normal <- all(normResult$p > 0.05)
-print(normResult) # super not normal -> report p.adj
+# set time as factor for locomotion metrics
+filtered$timepoint <- factor(filtered$timepoint,
+                                        levels = c("0","1","2","4","10","16"))
 
-
-# Linear mixed-effects model (lmer from lme4)
-# mixed model: repeated measures
-# treatment and timepoint are fixed effect, animal is random effect
 
 # set reference terms explicitly 
-speed_df$timepoint <- relevel(factor(speed_df$timepoint), ref = "0") # establishes baseline as with-in subject reference  
-speed_df$treatment     <- relevel(factor(speed_df$treatment), ref = "A")  # establishes control treatment as between subject reference 
+filtered$timepoint <- relevel(factor(filtered$timepoint), ref = "0") # establishes baseline as with-in subject reference  
+filtered$treatment     <- relevel(factor(filtered$treatment), ref = "AAV5-EYFP")  # establishes control treatment as between subject reference 
 
-model <- lmer(max_speed~treatment * timepoint + (1 | animal), data = speed_df) # (1 | animal) accounts for repeated measures of animals
+
+# 3) Fit a Linear Mixed Effects Model (lmer from lme4)
+  # mixed model: repeated measures
+  # treatment and timepoint are fixed effect, animal is random effect
+  # choosing lmer over 2-way anova here because missing data, repeated measures
+  # NOTE: independence is satisfied by design, the random effect on animal accounts for within-subject correlation across timepoints. No indep. assumption test needed.
+  # help("pvalues",package="lme4") # pulls up R help page for model summary interpretation
+
+
+# simple model: random intercept (animal) only
+model <- lmer(max_speed ~ treatment * timepoint + (1 | animal), data = filtered) # adjust variable for stats on each measure of interest (resting mean, distance mean, etc.)
 summary(model)
 
-# to extract traditional inference (p-values), use emmeans from emmean library 
-emm <- emmeans(model, ~ treatment * timepoint) # update model to run variables (model) vs TIC (model2)
-comp <- pairs(emm, by = "timepoint", adjust = "holm") # Compare each treatment to reference treatment at each timepoint
-comp_df <- as.data.frame(summary(comp, infer = c(TRUE, TRUE))) # gives CIs and p-values and stores in df
-comp_df[] <- lapply(comp_df, function(x) if(is.numeric(x)) round(x, 4) else x) # round values to 4 decimal places. just note, this convers <0.001 to 0
-write_xlsx(comp_df, "contrasts_results.xlsx") # save to an excel file to current wd 
+
+# get overall fixed effects in an ANOVA-style table (F stat, df, p)
+anova(model, ddf = 'Satterthwaite') # Satterthwaite is also applied by model
 
 
-# plot residuals if desired
-#plot(model, type = c("p","smooth"))
-#qqmath(model, id = 0.05)
+# Check Model Assumptions
+
+# a) Normality of residuals
+shapiro.test(residuals(model))
+qqnorm(residuals(model)); qqline(residuals(model))
+
+
+# b) Normality of random effects (intercepts and slopes)
+ranef_vals <- ranef(model)$animal[[1]]
+shapiro.test(ranef_vals)
+qqnorm(ranef_vals); qqline(ranef_vals)
+
+
+# c) Homoscedasticity: constant variance of residuals between groups (looking for a funnel shape)
+plot(model, type = c("p", "smooth"))           # residuals vs fitted
+plot(model, sqrt(abs(resid(.))) ~ fitted(.))    # scale-location plot
+
+
+# d) Normality + spread combined
+qqmath(model, id = 0.05) # flags potential outlier residuals by animal
+
+
+# Get Inference - use emmeans from emmean library to extract traditional inference (p-values), 
+emm <- emmeans(model, ~ treatment * timepoint) 
+
+# compare each treatment to reference treatment at each timepoint (pairwise comparisons)
+comp <- pairs(emm, by = "timepoint", adjust = "holm")
+
+# store with CIs and rounded p-values
+comp_df <- as.data.frame(summary(comp, infer = c(TRUE, TRUE))) %>%
+  mutate(across(where(is.numeric), ~ round(.x,4))) %>%
+  mutate(p.value = ifelse(p.value < 0.0001, "<0.0001", as.character(p.value)))
+
+
+# save to an excel file to current wd
+write_xlsx(comp_df, path = here("Digigait", "Dataframes", "Linear Mixed Effects results", "maxSpeed__treatment_LME_results.xlsx")) 
+
+
+
+
+# Model 2) By sex (3 way)
+model_sex <- lmer(max_speed ~ treatment * timepoint * sex + (1|animal), data = filtered)
+summary(model_sex)
+
+
+# get overall fixed effects in an ANOVA-style table (F stat, df, p)
+anova(model_sex, ddf = 'Satterthwaite') # Satterthwaite is also applied by model
+
+# Check Model Assumptions
+
+# a) Normality of residuals
+shapiro.test(residuals(model_sex))
+qqnorm(residuals(model_sex)); qqline(residuals(model_sex))
+
+
+# b) Normality of random effects (intercepts and slopes)
+ranef_vals <- ranef(model_sex)$animal[[1]]
+shapiro.test(ranef_vals)
+qqnorm(ranef_vals); qqline(ranef_vals)
+
+
+# c) Homoscedasticity: constant variance of residuals between groups (looking for a funnel shape)
+plot(model, type = c("p", "smooth"))           # residuals vs fitted
+plot(model, sqrt(abs(resid(.))) ~ fitted(.))    # scale-location plot
+
+
+# d) Normality + spread combined
+qqmath(model, id = 0.05) # flags potential outlier residuals by animal
+
+
+# Get Inference - use emmeans from emmean library to extract traditional inference (p-values), 
+emm2 <- emmeans(model_sex, ~ sex * timepoint | treatment) 
+
+# compare each treatment to reference treatment at each timepoint (pairwise comparisons)
+comp2 <- pairs(emm2, by = c("treatment", "timepoint"), adjust = "holm") 
+
+# store with CIs and p-values
+comp_df2 <- as.data.frame(summary(comp2, infer = c(TRUE, TRUE))) %>%
+  mutate(across(where(is.numeric), ~ round(.x, 4))) %>%
+  mutate(p.value = ifelse(p.value < 0.0001, "<0.0001", as.character(p.value)))
+
+# save to an excel file to current wd
+write_xlsx(comp_df2, path = here("Digigait", "Dataframes", "Linear Mixed Effects results", "maxSpeed_sex_LME_results.xlsx")) 
 
 
 
