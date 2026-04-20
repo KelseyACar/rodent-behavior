@@ -119,7 +119,7 @@ loco <- loco %>%
 write.csv(loco,file = here("Locomotion","Dataframes", "raw_locomotion.csv"))
 
 
-##### Summary Dataframes ####
+################################ Summary Dataframes ###############################
 loco <- read.csv(file = here("Locomotion","Dataframes", "raw_locomotion.csv"))
 
 # F-N animalSums will sum over full session (60min), while the added bin_range = 1:6 will sum first 30min, so either can be used in analysis and graphing
@@ -142,14 +142,7 @@ TIZ_2 <- TIZ_2 %>% filter(zone != 'None')
 write.csv(TIZ_2,file = here("Locomotion","Dataframes","timeInZone_sex_summary.csv"))
 
 
-#2) Time in center (TIC) & Time in edge summaries (TIE)
-TIC_animal <- TIZ_animal %>% filter(zone == "Center") #reduce to time in center
-write.csv(TIC_animal,file = here("Locomotion","Dataframes","timeInCenter_byAnimal.csv"))
-
-TIE_animal <- TIZ_animal %>% filter(zone == "Edge") #reduce to time in edge
-write.csv(TIE_animal,file = here("Locomotion","Dataframes","timeInEdge_byAnimal.csv"))
-
-#3) Get sum of all variable per animal (average speed handled outside of function)
+#3) Using FN: animalSums, get sum of all variable per animal (average speed handled outside of function)
 # automate with variable vector
 sum_variables <- c("ambulatory_s", "stereotypic_s", "resting_s", "rearing_events_z_axis", "rearing_time_z_s", "distance_m")
 
@@ -228,55 +221,209 @@ treatment_summary <- animal_sums %>%
 write.csv(treatment_summary, file = here("Locomotion", "Dataframes", "treatment_summary.csv"))
 
 
-################################ Analysis ################################
-# Check Assumptions
-# 1) check for extreme outliers
-outliers <- identify_outliers(animal_sums, resting_s_total)  #replace w/ each variable to test: definitely outliers across groups due to viral effect (will remove if injections were confirmed misses)
-View(outliers)
-
-# 2) Normality check
-normResult <- animal_sums %>%
-  shapiro_test(resting_s_total)  
-is_normal <- all(normResult$p > 0.05)
-print(normResult)                         # not normal -> report p.adj
-print(is_normal)
+################################ Analysis Prep ################################
 
 
-# Linear mixed-effects model (lmer from lme4)
+# 1) Define variables to test in a loop
+  # animal and sex level = data_animal
+  # zone = string defined, NULL if not running TIC or TIE
+
+
+model_targets <- list(
+  list(var = "resting_s_total", data = animal_sums, label = "Resting_Time"),
+  list(var = "rearing_events_z_axis_total", data = animal_sums, label = "Rearing_Events" ), 
+  list(var = "rearing_time_z_s_total", data = animal_sums, label = "Rearing_Time"), 
+  list(var = "distance_m_total", data = animal_sums, label = "Distance"), 
+  list(var = "avg_speed_total", data = animal_sums, label = "Avg_Speed"),
+  list(var = "total_sum", data = TIZ_animal, label = "Time_in_Center", zone = "Center")
+)
+
+
+# 2) Define a helper fn to prep a df for a given model target
+model_prep <- function(df, var, zone_filter = NULL) {
+  
+  # filter to zone if specified
+  if (!is.null(zone_filter)) {
+    df <- df %>% filter(zone == zone_filter)
+  }
+  
+  # drop NAs for variable and model terms to prevent errors/ not running
+  df <- df %>%
+    filter(!is.na(.data[[var]]), !is.na(virus), !is.na(timepoint), !is.na(animal), !is.na(sex))
+  
+  # set factors and model reference levels
+  df$timepoint <- relevel(factor(df$timepoint,
+                                 levels = c("0", "1", "2", "4", "10", "16")), ref = "0")
+  df$virus <- relevel(factor(df$virus), ref = "AAV5-EYFP")
+  df$sex <- factor(df$sex)
+  
+  # convert to clean df
+  df <- as.data.frame(df)
+  
+  return(df)
+}
+
+
+
+# Outlier check (raw data, pre-model) -------------------------------------------------------
+for (target in model_targets) {
+  
+  var <- target$var
+  df <- target$data
+  label <- target$label
+
+  # across all groups (outliers expected due to viral effect)
+  outliers_all <- identify_outliers(df, !!sym(var))
+  cat("Outliers across all groups:\n")
+  print(outliers_all)
+  
+  # within each viral group separately (more meaningful check)
+  for (v in unique(df$virus)) {
+    df_v <- df %>% filter(virus == v)
+    outliers_v <- identify_outliers(df_v, !!sym(var))
+    if (nrow(outliers_v) > 0) {
+      cat("\nOutliers in", v, ":\n")
+      print(outliers_v)
+    }
+  }
+}
+
+
+# Analysis ----------------------------------------------------------------
+
+
+# Fit Models  ------------------------------------------
+
+# Fit a Linear Mixed Effects Model (lmer from lme4)
   # mixed model: repeated measures
   # treatment and timepoint are fixed effect, animal is random effect
+  # choosing lmer over 2-way anova here because missing data, repeated measures
+  # NOTE: independence is satisfied by design, the random effect on animal accounts for within-subject correlation across timepoints. No indep. assumption test needed.
+  # help("pvalues",package="lme4") # pulls up R help page for model summary interpretation
 
 
-# locomotion variables
-# set time as factor
-animal_sums$timepoint <- factor(animal_sums$timepoint,
-                                levels = c("0","1","2"))
-# set reference terms explicitly 
-animal_sums$timepoint <- relevel(factor(animal_sums$timepoint), ref = "0") # establishes baseline as with-in subject reference  
-animal_sums$treatment     <- relevel(factor(animal_sums$treatment), ref = "A")  # establishes control treatment as between subject reference 
+# store fitted models for use in inference loop
+fitted_models <- list()
 
-# run simple model: random intercept (animal) only
-model <- lmer(distance_m_total ~ treatment * timepoint + (1 | animal), data = animal_sums) # adjust variable for stats on each measure of interest (resting mean, distance mean, etc.)
-summary(model) # posthoc tests not necessary when running summary(model), multiple comparisons accounted for
+for (target in model_targets) {
+  var <- target$var
+  label <- target$label
+  
+  cat("MODEL:", label, "\n")
+  
+  # prep dfs
+  df_clean <- as.data.frame(model_prep(target$data, var, target$zone))
+   
+  
+  # build model formulas
+  f_treatment <- as.formula(paste(var, "~ treatment * timepoint + (1|animal)"))
+  f_sex <- as.formula(paste(var, "~ treatment * timepoint * sex + (1|animal)"))
+  
+  # fit model 
+  m_treatment <- lmer(f_treatment, data = df_clean)
+  m_sex <- lmer(f_sex, data = df_clean)
+  
+  cat("treatment model fit:", label, "\n")
+  cat("Sex model fit:", label, "\n")
+  
+  # store both models and metadata
+  fitted_models[[label]] <- list(
+    m_treatment = m_treatment,
+    m_sex = m_sex,
+    var = var,
+    label = label
+  )
+  }
 
-# Time in Center
-TIC_animal$timepoint <- relevel(factor(TIC_animal$timepoint), ref = "0") # establishes baseline as with-in subject reference  
-TIC_animal$treatment     <- relevel(factor(TIC_animal$treatment), ref = "A")  # establishes control treatment as between subject reference 
 
-model2 <- lmer(total_mean ~ treatment * timepoint + (1 | animal), data = TIC_animal)
-summary(model2)
-# help("pvalues",package="lme4") # pulls up R help page for model summary interpretation
+# Summaries & Fixed Effects -------------------------------------------------
+for (entry in fitted_models) {
+  cat("SUMMARY:", entry$label, "\n")
+  
+  cat("\n ", entry$label, "treatment Model Summary \n")
+  print(summary(entry$m_treatment))
+  cat("\n ", entry$label, "treatment Fixed Effects (F-table) \n")
+  print(anova(entry$m_treatment, ddf = "Satterthwaite"))
+  
+  cat("\n ", entry$label, "Sex Model Summary \n")
+  print(summary(entry$m_sex))
+  cat("\n ", entry$label, "Sex Fixed Effects (F-table) \n")
+  print(anova(entry$m_sex, ddf = "Satterthwaite"))
+}
 
-# to extract traditional inference (p-values), use emmeans from emmean library 
-emm <- emmeans(model2, ~ treatment * timepoint) # update model to run variables (model) vs TIC (model2)
-comp <- pairs(emm, by = "timepoint", adjust = "holm") # Compare each treatment to reference treatment at each timepoint
-comp_df <- as.data.frame(summary(comp, infer = c(TRUE, TRUE))) # gives CIs and p-values and stores in df
-comp_df[] <- lapply(comp_df, function(x) if(is.numeric(x)) round(x, 4) else x) # round values to 4 decimal places. just note, this convers <0.001 to 0
-write_xlsx(comp_df, "contrasts_results.xlsx") # save to an excel file to current wd 
 
-# plot residuals if desired
-#plot(model, type = c("p","smooth"))
-#qqmath(model, id = 0.05)
+
+# Model Assumption Checks -------------------------------------------------
+for (entry in fitted_models) {
+  cat("ASSUMPTIONS:", entry$label, "\n")
+
+  for (m in list(list(mod = entry$m_treatment, tag = "treatment"),
+                 list(mod = entry$m_sex,  tag = "sex"))) {
+    
+    cat("\n---", entry$label, m$tag, "---\n")
+    
+    # Normality of residuals
+    sw_resid <- shapiro.test(residuals(m$mod))
+    p_resid  <- ifelse(sw_resid$p.value < 0.0001, "<0.0001", 
+                       round(sw_resid$p.value, 4))
+    cat("Shapiro-Wilk residuals: W =", round(sw_resid$statistic, 4),
+        "p =", p_resid, "\n")
+    
+    # Normality of random effects
+    ranef_vals <- ranef(m$mod)$animal[[1]]
+    if (length(unique(ranef_vals)) == 1) {
+      cat("Shapiro-Wilk random effects: SKIPPED — singular fit,",
+          "all BLUPs identical (random effect variance = 0)\n")
+    } else {
+      sw_ranef <- shapiro.test(ranef_vals)
+      p_ranef  <- ifelse(sw_ranef$p.value < 0.0001, "<0.0001",
+                         round(sw_ranef$p.value, 4))
+      cat("Shapiro-Wilk random effects: W =", round(sw_ranef$statistic, 4),
+          "p =", p_ranef, "\n")
+    }
+    
+    # Q-Q plots
+    par(mfrow = c(1,2))
+    qqnorm(residuals(m$mod), main = paste(entry$label, m$tag, "residuals Q-Q"))
+    qqline(residuals(m$mod))
+    qqnorm(ranef_vals, main = paste(entry$label, m$tag, "random effects Q-Q"))
+    qqline(ranef_vals)
+    par(mfrow = c(1,1))
+    
+    # Homoscedasticity
+    print(plot(m$mod, type = c("p","smooth"),
+               main = paste(entry$label, m$tag, "residuals vs fitted")))
+  }
+}
+
+
+
+# Model Inference ---------------------------------------------------------
+for (entry in fitted_models) {
+  cat("Inference:", entry$label, "\n")
+  
+  # treatment model — compare each treatment to reference at each timepoint
+  emm_treatment <- emmeans(entry$m_treatment, ~ treatment * timepoint)
+  comp_treatment <- pairs(emm_treatment, by = "timepoint", adjust = "holm") # Holm's p adj
+  comp_treatment_df <- as.data.frame(summary(comp_treatment, infer = c(TRUE, TRUE))) %>%
+    mutate(across(where(is.numeric), ~ round(.x, 4))) %>%
+    mutate(p.value = ifelse(p.value < 0.0001, "<0.0001", as.character(p.value)))
+  
+  write_xlsx(comp_treatment_df,
+             path = here("Locomotion", "Dataframes", "Linear Mixed Effects results",
+                         paste0(entry$label, "_treatment_LME_results.xlsx")))
+  cat("Saved:", entry$label, "treatment results\n")
+  
+  # Sex model — compare M vs F within each treatment at each timepoint
+  emm_sex  <- emmeans(entry$m_sex, ~ sex * timepoint | treatment)
+  comp_sex <- pairs(emm_sex, by = c("treatment", "timepoint"), adjust = "holm")
+  comp_sex_df <- as.data.frame(summary(comp_sex, infer = c(TRUE, TRUE))) %>%
+    mutate(across(where(is.numeric), ~ round(.x, 4))) %>%
+    mutate(p.value = ifelse(p.value < 0.0001, "<0.0001", as.character(p.value)))
+  
+  write_xlsx(comp_sex_df, path = here("Locomotion", "Dataframes", "Linear Mixed Effects results", paste0(entry$label, "_sex_LME_results.xlsx")))
+  cat("Saved:", entry$label, "sex results\n")
+}
 
 
 ######################################### Data Visualization #########################################
