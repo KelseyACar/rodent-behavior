@@ -1,34 +1,15 @@
 # This Script -------------------------------------------------------------
-  # Visualizes Autotrack open-field locomotor position data in 2D and 3D plots over time 
+  # Visualizes Auto-Track open-field position data in 2D and 3D plots over time 
   # requires user to create a metadata file with each file name mapped to the animal, treatment, timepoint, etc. 
 # Load Libraries 
 # Create Dataframe
-  # call in metadata frame (created outside of R)
-  # loop over files of each timepoint, skipping unnecessary rows from program (like 21!)
-  # read files & merge df
 # Pre-process
-  # reduce df to time desired for plots
-  # convert time from 0.1 seconds to minutes
 # 2D plots
-  # x & y axes track plots over the first 15 min
-  # 1 representative plot / virus type, facet grid by timepoint
 # 3D plots
-  # 1) Binary resting locations
-    # re-read & pre-process full df 
-    # set desired column to binary: here I did multiple in case we wanted to plot seperate things, but we stuck with z state of resting (1 = resting, 0 = not)
-    # set color gradient for where in the session the resting (z_State == 1) occurred accross full length of the session
-    # subset animal & timepoint of interest and plot 
-    # plot saves directly to directory subfolder
-  # 2) Animated version of the above plots
-    # change dot color to stick w/ viral group colors & plot -> screen record to save animation (couldn't figure out export)
-    # lose color gradient based on time in these plots
-  # 3) Full session trajectory plot ("tornado" plot from Harris's VTA paper in Nature Comms)
-    # re-subset the dataframe to select each timepoint, but retain full session length
-    # plot that thang
 
 
 # Load Libraries ---------------------------------------------------------------
-pacman::p_load('dplyr', 'tidyverse', 'ggplot2', 'here', 'purrr', 'readr', 'viridis', 'scatterplot3d', 'plotly','png','orca','gridExtra') # auto installs required packages not yet installed
+pacman::p_load('dplyr', 'tidyverse', 'ggplot2', 'here', 'purrr', 'janitor', 'readr', 'viridis', 'scatterplot3d', 'plotly','png', 'gridExtra') # auto installs required packages not yet installed
 source(here('Loco_functions.R'))
 here::i_am("AutoTrack_positions.R")
 
@@ -66,18 +47,16 @@ position_files <- tibble(
 # Check for mismatch between file_mapping and position_files
 anti_join(file_mapping, position_files, by = "file_name")
 position_files$file_name <- trimws(position_files$file_name)
-#View(position_files)
+
 
 # merge metadata and file mapping
 full_metadata <- file_mapping %>%
   left_join(metadata, by = "AnimalID")
-#View(full_metadata)
+
 
 # merge files with metadata
 position_df <- full_metadata %>%
   left_join(position_files, by = "file_name")
-#View(position_df)
-
 
 
 # read and process files into full df
@@ -98,12 +77,65 @@ pos_final <- position_df %>%
 pos_final <- clean_names(pos_final)
 pos_final <- pos_final %>% drop_na()
 
-View(pos_final)
-
-write.csv(pos_final, here("Locomotion", "Dataframes", "positions_df.csv"))
+write.csv(pos_final, here("Locomotion", "Dataframes", "positions_df.csv"), row.names = FALSE)
 
 
+# Helper FNs --------------------------------------------------------------
 
+
+# 2D plot helper fn 
+track_plot_2D <- function(df, target_animal_id){
+  df <- df %>% filter(animal_id == target_animal_id)
+  sex = unique(df$sex)
+  genotype = unique(df$genotype)
+  
+  p <- ggplot(df, aes(x = x_position, y = y_position, color = time_as_min)) +
+    geom_path(linewidth = 0.3) +
+    facet_grid(~timepoint) +
+    scale_colour_gradient2(low = "#fc8d59",mid = "#ffffbf",high = '#91bfdf',
+                           midpoint = 7.5,
+                           limits = c(0,15)) +
+    theme_minimal(base_size = 10) +
+    labs(title = paste(timepoint, sex, genotype),
+         color = " Elapsed time (min)") + # legend title
+    coord_fixed() + # maintains 1:1 aspect ratio
+    theme(
+      legend.position = "right", 
+      plot.title = element_text(size = 14, hjust =0),
+      axis.text.y = element_text(size=12),
+      axis.ticks = element_blank(),
+      axis.text.x = element_text(size=12),
+      legend.title=element_text(size=10),
+      legend.text=element_text(size=8),
+      strip.background = element_rect(colour = 'white')
+    )
+  p
+}
+
+
+# 3D climbing z plot fn
+make_z_climb_plot <- function(df, target_animal_id, target_timepoint, label) {
+  pos_3D <- df %>%
+    filter(animal_id == target_animal_id & timepoint == target_timepoint) %>%
+    arrange(time_s)
+  
+  p <- plot_ly(
+    data = pos_3D, x = ~x_position, y = ~y_position, z = ~time_s,
+    type = 'scatter3d', mode = 'lines',
+    line = list(color = ~time_s, colorscale = 'Plasma')
+  ) %>%
+    layout(
+      title = label,
+      scene = list(
+        aspectmode = 'manual', aspectratio = list(x = 1, y = 1, z = 5),
+        xaxis = list(showgrid = FALSE, zeroline = FALSE, title = 'X'),
+        yaxis = list(showgrid = FALSE, title = 'Y'),
+        zaxis = list(showgrid = FALSE, title = 'Time (s)'),
+        camera = list(eye = list(x = 1.5, y = 1.8, z = 1.4))
+      )
+    ) 
+  p
+}
 
 
 ################## Pre-process ##################
@@ -116,33 +148,21 @@ pos_reduced <- pos_final %>%
 # convert time from 0.1 sec to minutes
 pos_reduced <- pos_reduced %>%
   mutate(time_as_min =time_s / 60)
-View(pos_reduced)
+
+
+
+# set IDs to plot ----------------------------------------------------
+representative_A <- "2AM"
+representative_B <- "5BM"
+representative_C <- "4CF"
 
 
 
 ################## 2D plots ##################
-
+# selected animal ID plot will automatically select corresponding genotype/age/sex and add to plot title 
 
 # Adjust animal ID and treatment type as needed
-A <- ggplot(pos_reduced %>% filter(animal_id == '2AM'), aes(x=x_position, y=y_position, color = time_as_min)) +
-  geom_path(linewidth = 0.3) +
-  facet_grid(~timepoint) +
-  scale_colour_gradient2(low = "#fc8d59",mid = "#ffffbf",high = '#91bfdf',
-                         midpoint = 7.5,
-                         limits = c(0,15)) +
-  theme_minimal(base_size = 10) +
-  labs(title = 'Treatment A') +
-  coord_fixed() + # maintains 1:1 aspect ratio
-  theme(
-    legend.position = "right", 
-    plot.title=element_text(size = 10, hjust =0),
-    axis.text.y=element_text(size=6),
-    axis.ticks=element_blank(),
-    axis.text=element_text(size=6),
-    legend.title=element_text(size=6),
-    legend.text=element_text(size=4),
-    strip.background = element_rect(colour = 'white')
-  )
+A <- track_plot_2D(pos_reduced, representative_A)
 A
 ggsave(here("Locomotion", "Graphs", "position plots","2D track plots", "A_2Dpos_15min.pdf"),
        plot = A, width = 8, height = 8, dpi = 300)
@@ -150,50 +170,14 @@ ggsave(here("Locomotion", "Graphs", "position plots","2D track plots", "A_2Dpos_
 
 
 # B
-B <- ggplot(pos_reduced %>% filter(animal_id == '5BM'), aes(x=x_position, y=y_position, color = time_as_min)) +
-  geom_path(linewidth = 0.3) +
-  facet_grid(~timepoint) +
-  scale_colour_gradient2(low = "#fc8d59",mid = "#ffffbf",high = '#91bfdf',
-                         midpoint = 7.5,
-                         limits = c(0,15)) +
-  theme_minimal(base_size = 10) +
-  labs(title = 'Treatment B') +
-  coord_fixed() + # maintains 1:1 aspect ratio
-  theme(
-    legend.position = "right", 
-    plot.title=element_text(size = 10, hjust =0),
-    axis.text.y=element_text(size=6),
-    axis.ticks=element_blank(),
-    axis.text=element_text(size=6),
-    legend.title=element_text(size=6),
-    legend.text=element_text(size=4),
-    strip.background = element_rect(colour = 'white')
-  )
+B <- track_plot_2D(pos_reduced, representative_B)
 B
 ggsave(here("Locomotion", "Graphs", "position plots", "2D track plots", "B_2Dpos_15min.pdf"),
        plot = B, width = 8, height = 8, dpi = 300)
 
 
 # C
-C <- ggplot(pos_reduced %>% filter(animal_id == '4CF'), aes(x=x_position, y=y_position, color = time_as_min)) +
-  geom_path(linewidth = 0.3) +
-  facet_grid(~timepoint) +
-  scale_colour_gradient2(low = "#fc8d59",mid = "#ffffbf",high = '#91bfdf',
-                         midpoint = 7.5,
-                         limits = c(0,15)) +
-  theme_minimal(base_size = 10) +
-  labs(title = 'Treatment C') +
-  coord_fixed() + # maintains 1:1 aspect ratio
-  theme(
-    legend.position = "right", 
-    plot.title=element_text(size = 10, hjust =0),
-    axis.text.y=element_text(size=6),
-    axis.ticks=element_blank(),
-    axis.text=element_text(size=6),
-    legend.title=element_text(size=6),
-    legend.text=element_text(size=4),
-    strip.background = element_rect(colour = 'white')
-  )
+C <- track_plot_2D(pos_reduced, representative_C)
 C
 ggsave(here("Locomotion", "Graphs", "position plots", "2D track plots", "C_2Dpos_15min.pdf"),
        plot = C, width = 8, height = 8, dpi = 300)
@@ -207,21 +191,15 @@ ggsave(here("Locomotion", "Graphs","position plots","2D track plots", "allGroups
 
 
 
-
-
-
-
 ################## 3D plots ##################
 
 # 1) 3D plot represent where in the chambers resting is happening 
-
 pos_final <- read.csv(here("Locomotion", "Dataframes", "positions_df.csv"))
 
 
 #convert axes of interest to binary: can replace with any action of interest (Resting, rearing, etc.)
 pos_3D <- pos_final %>%
   mutate(z_state = ifelse(pos_final$state == 'Resting', 1, 0))
-#View(pos_3D)
 
 
 # create color vector to plot points in a gradient over time of session  
@@ -311,37 +289,26 @@ plot_ly(data = C, x = ~x_position, y = ~y_position, z = ~z_state,
 
 
 
-# 3) 3D trajectory plots
+# 3) 3D trajectory plots (z = elapsed time)
+  # builds one plot per represntative animal x timepoint combinaation using make_z_climb_plot()
 
 
-A2 <- subset(pos_final, animal_id == '2AM' & timepoint == 0)
-B2 <- subset(pos_final, animal_id =='5BM' & timepoint == 0)
-C2 <- subset(pos_final, animal_id == '4CF' & timepoint ==0)
+z_climb_grid <- expand_grid(
+  animal_id = c(treatment_A, treatment_B, treatment_C),
+  timepoint = unique(pos_reduced$timepoint)
+)
 
-p <- plot_ly(
-  data = C2, # change per group
-  x = ~x_position,
-  y = ~y_position,
-  z = ~time_s, 
-  type = 'scatter3d',
-  mode = 'lines',
-  line = list(
-    color = ~time_s,          # optional gradient by time
-    colorscale = 'Plasma')   # change to Plasma, Inferno, etc.
-) %>%
-  layout(
-    title = "C: wk 0", # change per plot
-    scene = list(
-      aspectmode = 'manual',
-      aspectratio = list(x=1, y=1, z=5), #manually set aspect ratio
-      xaxis = list(showgrid = FALSE, zeroline = FALSE, title = 'X'), #remove grids, set titles
-      yaxis = list(showgrid = FALSE, title = 'Y'),
-      zaxis = list(showgrid = FALSE, title = 'Time'),
-      
-      camera = list(
-        eye = list(x=1.5, y= 1.8, z = 1.4))
-    )
+z_climb_plots <- pmap(z_climb_grid, function(animal_id, timepoint) {
+  make_z_climb_plot(
+    df               = pos_reduced,
+    target_animal_id = animal_id,
+    target_timepoint = timepoint,
+    label            = paste0(animal_id, " \u2014 wk", timepoint)
   )
-p
+})
+names(z_climb_plots) <- paste(z_climb_grid$animal_id, z_climb_grid$timepoint, sep = "_wk")
+
+# Print one to the Viewer pane, then use the camera icon in its toolbar to export a PNG (already sized via config() inside the function). e.g.:
+# z_climb_plots[["2AM_wk0"]]
 
 
