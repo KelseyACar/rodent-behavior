@@ -87,7 +87,7 @@ write.csv(pos_final, here("Locomotion", "Dataframes", "positions_df.csv"), row.n
 track_plot_2D <- function(df, target_animal_id){
   df <- df %>% filter(animal_id == target_animal_id)
   sex = unique(df$sex)
-  genotype = unique(df$genotype)
+  treatment = unique(df$treatment)
   
   p <- ggplot(df, aes(x = x_position, y = y_position, color = time_as_min)) +
     geom_path(linewidth = 0.3) +
@@ -96,7 +96,7 @@ track_plot_2D <- function(df, target_animal_id){
                            midpoint = 7.5,
                            limits = c(0,15)) +
     theme_minimal(base_size = 10) +
-    labs(title = paste(timepoint, sex, genotype),
+    labs(title = paste(treatment, timepoint, sex),
          color = " Elapsed time (min)") + # legend title
     coord_fixed() + # maintains 1:1 aspect ratio
     theme(
