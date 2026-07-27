@@ -1,19 +1,13 @@
-# This Script -------------------------------------------------------------
+#This Script -------------------------------------------------------------
   # Pulls in residency data from Auto-Track software used with Columbus Instruments open-field locomotion chambers & visualizes animals location as heat maps
-# Load Libraries
-# Build Dataframe
-  # call in pre-made metadata excel sheet of project info: animal ID, time, treatment, etc.
-  # call in a pre-made filename sheet
-  # loop over raw data files and merge with metadata
-# Pre-Processing
-  # log transform time spent at each x/y
-  # global scale time spent with min/max so that heat map colors represent the same value in all plots
-# Heat maps
-  # set palette
+  # Load Libraries
+  # Build Dataframe
+  # Pre-Processing
+  # Heat maps
   # for each treatment type, filter to 1 representative animal and plot a heat map of their residency, faceted by time
   # combine all treatment plots into 1 grand plot if desired
-
-# Load Libraries ----------------------------------------------------------
+  
+  # Load Libraries ----------------------------------------------------------
 pacman::p_load('dplyr', 'tidyverse', 'ggplot2', 'here', 'purrr', 'readr', 'viridis', 'dichromat', 'gridExtra') # auto installs required packages not yet installed
 here::i_am("AutoTrack_residency.R")
 source(here('Loco_functions.R'))
@@ -44,7 +38,7 @@ Residency_files <- tibble(
   file_name = basename(unlist(file_paths)),
   full_path = unlist(file_paths)
 )
-# View(Residency_files)
+
 
 # Check for mismatch between file_mapping and Residency_files
 #anti_join(file_mapping, Residency_files, by = "file_name")
@@ -53,19 +47,16 @@ Residency_files <- tibble(
 # merge metadata and file mapping
 full_metadata <- file_mapping %>%
   left_join(metadata, by = "AnimalID")
-# View(full_metadata)
 
 
 # merge files with metadata       
 residency_df <- full_metadata %>%
   left_join(Residency_files, by = "file_name")
-# View(residency_df)
 
 
 # filer NA for timepoints / animals that don't have files yet (remove at end of project) 4.5.25
 residency_df <- residency_df %>%
   filter(!is.na(full_path), file.exists(full_path))
-
 
 # read and process files into full df
 res_process <- function(full_path, AnimalID, Sex, Treatment, Timepoint, ... ) {
@@ -103,14 +94,11 @@ res_process <- function(full_path, AnimalID, Sex, Treatment, Timepoint, ... ) {
 }
 
 # apply function to each file
-res_final <- pmap_dfr(residency_df %>% select(full_path, AnimalID, Sex, Treatment, Timepoint),res_process)
+res_final <- pmap_dfr(residency_df %>% select(full_path, AnimalID, Sex, Treatment, Timepoint), res_process)
 
 # creates an extra y axis of NA values, filter out 
 res_final <- res_final %>%
   filter(res_final$y != 'NA')
-View(res_final)
-
-
 
 
 
@@ -125,7 +113,71 @@ res_scaled <- res_final %>%
   ungroup()
 
 # View(res_scaled)
-write.csv(res_scaled, file = here("Locomotion", "Dataframes", "residency_df.csv"))
+write.csv(res_scaled, file = here("Locomotion", "Dataframes", "residency_df.csv"), row.names = FALSE)
+
+
+# Helper Fns ---------------------------------------------------------------
+
+# individual heat map fn
+indiv_heat_map <- function(df, animal_id) {
+  df <- df %>% filter(animalID == animal_id)
+  sex = unique(df$sex)
+  treatment = unique(df$treatment)
+  
+  p <- ggplot(df, aes(x= x, y= y, fill= time_scaled))+
+    geom_tile(color= "white") + 
+    facet_grid(~timepoint) +
+    scale_fill_gradientn(colours = palette) +
+    coord_equal() + 
+    theme_minimal(base_size = 10) +
+    labs(title = paste(treatment, timepoint), subtitle = animal_id) + 
+    theme(
+      legend.position = "right", 
+      plot.title=element_text(size = 14, hjust =0),
+      axis.text.y=element_text(size=12),
+      axis.ticks=element_blank(),
+      axis.text.x=element_text(size=12),
+      legend.title=element_text(size=10),
+      legend.text=element_text(size=8),
+      strip.background = element_rect(colour = 'white')
+    )
+  p
+}
+
+# summary heat maps
+# summarize by variables of interest: can be treatment, timepoint, sex, any combo of these
+# NOTE: added timepoint to group_by() and facet_grid() so weeks are shown
+# separately rather than averaged together across the whole study.
+summary_heat_map <- function(df, treatment_id){
+  
+  df <- df %>% filter(treatment == treatment) %>%
+    group_by(x, y, timepoint) %>%
+    summarize(mean_time = mean(time_scaled, na.rm = TRUE), .groups = "drop")
+  
+  p <- ggplot(df, aes(x= x, y= y, fill= mean_time))+
+    geom_tile(color= "white") + 
+    facet_grid(~timepoint) +
+    scale_fill_gradientn(colours = palette, limits = c(0, 1), oob = scales::squish) +
+    coord_equal() +
+    theme_minimal(base_size = 8) +
+    labs(title = treatment_id) +
+    theme(
+      legend.position = "right", 
+      plot.title=element_text(size = 14, hjust =0),
+      axis.text.y=element_text(size=12),
+      axis.ticks=element_blank(),
+      axis.text.x=element_text(size=12),
+      legend.title=element_text(size=10),
+      legend.text=element_text(size=8),
+      strip.background = element_rect(colour = 'white')
+    )
+  p
+}
+
+# Set animals to plot (indiv plots only) -----------------------------------
+representative_A <- "2AM"
+representative_B <- "5BM"
+representative_C <- "4CF"
 
 
 # Heat Maps ---------------------------------------------------------------
@@ -134,75 +186,22 @@ palette <- colorspace::sequential_hcl(5, palette = 'batlow')
 
 
 # A plot
-A <-ggplot(res_scaled %>% filter(animalID == "2AM"), aes(x= x, y= y, fill= time_scaled))+
-  geom_tile(color= "white") + 
-  facet_grid(~timepoint) +
-  scale_fill_gradientn(colours = palette) +
-  coord_equal() +
-  theme_minimal(base_size = 8) +
-  labs(
-    title= 'A : 2AM') +  
-  theme(
-    legend.position = "right", 
-    plot.title=element_text(size = 10, hjust =0),
-    axis.text.y=element_text(size=6),
-    axis.ticks=element_blank(),
-    axis.text=element_text(size=6),
-    legend.title=element_text(size=6),
-    legend.text=element_text(size=4),
-    strip.background = element_rect(colour = 'white')
-  )
+A <- indiv_heat_map(res_scaled, representative_A)
 A
 ggsave(here("Locomotion", "Graphs", "residency plots","A_residency.pdf"),
        plot = A, width = 6, height = 4, dpi = 300)
 
 
-# 1:100 plot : don't use 2AM
-B <-ggplot(res_scaled %>% filter(animalID == "5BM"), aes(x= x, y= y, fill= time_scaled))+
-  geom_tile(color= "white") + 
-  facet_grid(~timepoint) +
-  scale_fill_gradientn(colours = palette) +
-  coord_equal() +
-  theme_minimal(base_size = 8) +
-  labs(
-    title= 'B : 5BM') +  
-  theme(
-    legend.position = "right", 
-    plot.title=element_text(size = 10, hjust =0),
-    axis.text.y=element_text(size=6),
-    axis.ticks=element_blank(),
-    axis.text=element_text(size=6),
-    legend.title=element_text(size=6),
-    legend.text=element_text(size=4),
-    strip.background = element_rect(colour = 'white')
-  )
+# B plot
+B <- indiv_heat_map(res_scaled, representative_B)
 B
-
 ggsave(here("locomotion", "Graphs","residency plots", "B_residency.pdf"),
        plot = B, width = 6, height = 4, dpi = 300)
 
 
 # C plot
-C <-ggplot(res_scaled %>% filter(animalID == "4CF"), aes(x= x, y= y, fill= time_scaled))+
-  geom_tile(color= "white") + 
-  facet_grid(~timepoint) +
-  scale_fill_gradientn(colours = palette, limits = c(0,1)) +
-  coord_equal() +
-  theme_minimal(base_size = 8) +
-  labs(
-    title= 'C : 4CF') +  
-  theme(
-    legend.position = "right", 
-    plot.title=element_text(size = 10, hjust =0),
-    axis.text.y=element_text(size=6),
-    axis.ticks=element_blank(),
-    axis.text=element_text(size=6),
-    legend.title=element_text(size=6),
-    legend.text=element_text(size=4),
-    strip.background = element_rect(colour = 'white')
-  )
+C <- indiv_heat_map(res_scaled, representative_C)
 C
-
 ggsave(here("Locomotion", "Graphs","residency plots", "C_residency.pdf"),
        plot = C, width = 6, height = 4, dpi = 300)
 
@@ -212,6 +211,24 @@ combined <- grid.arrange(A, B, C)
 
 ggsave(here("Locomotion", "Graphs","residency plots", "residencyHeatMap_repAnimal.pdf"),
        plot = combined, width = 6, height = 4, dpi = 300)
+
+
+# Summary Heat Maps ---------------------------------------------------------
+# group-level heatmaps (mean across all animals sharing a treatment),
+# faceted by timepoint. Generates one plot per treatment level present
+# in the data, rather than hardcoding each group by hand.
+
+group_combos <- res_scaled %>% distinct(treatment)
+
+summary_plots <- pmap(group_combos, function(treatment) {
+  summary_heat_map(res_scaled, treatment_id = treatment)
+})
+names(summary_plots) <- group_combos$treatment
+
+# view/export individually, e.g. (substitute an actual treatment level from your data):
+# summary_plots[[1]]
+# ggsave(here("Locomotion", "Graphs", "residency plots", paste0("summary_", names(summary_plots)[1], ".pdf")),
+#        plot = summary_plots[[1]], width = 6, height = 4, dpi = 300)
 
 
 
